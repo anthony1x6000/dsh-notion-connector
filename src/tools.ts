@@ -45,12 +45,12 @@ function asJson<T>(value: unknown): T | undefined {
 export function notionSearchTool() {
   return defineTool({
     name: 'notion_search',
-    description: '在已配置的 Notion 工作区搜索页面与数据库。返回每个结果的 id、类型、标题、URL 与最后编辑时间。' +
-      'Triggers: Notion, 搜索 Notion, 在 Notion 里找.',
+    description: 'Search pages and databases in the configured Notion workspace. Returns each result id, type, title, URL and last-edited time.' +
+      'Triggers: Notion, search Notion, find in Notion.',
     parameters: {
-      query: { type: 'string', description: '搜索关键词；省略则返回工作区最近更新的内容' },
-      objectType: { type: 'string', enum: ['page', 'database'], description: '仅返回该类型的对象' },
-      limit: { type: 'integer', description: '返回条数上限，默认 10，最大 50' },
+      query: { type: 'string', description: 'Search keywords; omit to list what the workspace changed most recently' },
+      objectType: { type: 'string', enum: ['page', 'database'], description: 'Return only this kind of object' },
+      limit: { type: 'integer', description: 'Maximum results, default 10, max 50' },
     },
     output: { schema: { type: 'json' }, render: renderJson },
     timeoutMs: 60_000,
@@ -73,12 +73,12 @@ export function notionSearchTool() {
 export function notionReadPageTool() {
   return defineTool({
     name: 'notion_read_page',
-    description: '读取 Notion 页面的标题、属性与内容块。pageId 可传页面 id（形如 8ab3e1c2-xxxx-...）或完整页面 URL。' +
-      'Triggers: 读取 Notion 页面, 查看 Notion 内容.',
+    description: 'Read a Notion page title, properties and content blocks. pageId accepts a page id (like 8ab3e1c2-xxxx-...) or a full page URL.' +
+      'Triggers: read Notion page, view Notion content.',
     parameters: {
-      pageId: { type: 'string', required: true, description: '页面 id 或完整页面 URL' },
-      includeChildren: { type: 'boolean', description: '是否同时读取页面内容块（默认 true）' },
-      depth: { type: 'integer', description: '嵌套块递归深度（默认 2，最大 3）' },
+      pageId: { type: 'string', required: true, description: 'Page id or full page URL' },
+      includeChildren: { type: 'boolean', description: 'Also read the content blocks (default true)' },
+      depth: { type: 'integer', description: 'Nested block recursion depth, default 2, max 3' },
     },
     output: { schema: { type: 'json' }, render: renderJson },
     timeoutMs: 60_000,
@@ -93,14 +93,14 @@ export function notionReadPageTool() {
 export function notionQueryDatabaseTool() {
   return defineTool({
     name: 'notion_query_database',
-    description: '查询 Notion 数据库条目。filter 与 sorts 使用 Notion API 原生结构（见 https://developers.notion.com/reference/post-database-query）。' +
-      'Triggers: 查询 Notion 数据库, 数据库条目.',
+    description: 'Query entries in a Notion database. filter and sorts use the native Notion structures (see https://developers.notion.com/reference/post-database-query).' +
+      'Triggers: query Notion database, database entries.',
     parameters: {
-      databaseId: { type: 'string', required: true, description: '数据库 id 或 URL' },
-      filter: { type: 'json', description: '过滤条件（Notion 原生 filter 对象，如 {"property":"状态","select":{"equals":"进行中"}}）' },
-      sorts: { type: 'json', description: '排序数组（Notion 原生 sorts）' },
-      pageSize: { type: 'integer', description: '每页条数，默认 20，最大 100' },
-      startCursor: { type: 'string', description: '翻页游标（上一次结果的 nextCursor）' },
+      databaseId: { type: 'string', required: true, description: 'Database id or URL' },
+      filter: { type: 'json', description: 'Filter (native Notion filter object, e.g. {"property":"Status","select":{"equals":"In progress"}})' },
+      sorts: { type: 'json', description: 'Sort array (native Notion sorts)' },
+      pageSize: { type: 'integer', description: 'Entries per page, default 20, max 100' },
+      startCursor: { type: 'string', description: 'Paging cursor (nextCursor from the previous result)' },
     },
     output: { schema: { type: 'json' }, render: renderJson },
     timeoutMs: 60_000,
@@ -114,13 +114,13 @@ export function notionQueryDatabaseTool() {
 export function notionCreatePageTool() {
   return defineTool({
     name: 'notion_create_page',
-    description: '在 Notion 中创建页面。properties 与 children 使用 Notion API 原生结构（见 https://developers.notion.com/reference/post-page）。' +
-      'Triggers: 创建 Notion 页面, 写入 Notion, 保存到 Notion.',
+    description: 'Create a page in Notion. properties and children use the native Notion structures (see https://developers.notion.com/reference/post-page).' +
+      'Triggers: create Notion page, write to Notion, save to Notion.',
     parameters: {
-      parentType: { type: 'string', enum: ['page', 'database'], required: true, description: '父对象类型' },
-      parentId: { type: 'string', required: true, description: '父页面或父数据库的 id / URL' },
-      properties: { type: 'json', description: '页面属性对象，如 {"Name": {"title": [{"text": {"content": "标题"}}]}}' },
-      children: { type: 'json', description: '页面内容块数组（Notion block 对象）' },
+      parentType: { type: 'string', enum: ['page', 'database'], required: true, description: 'Parent object type' },
+      parentId: { type: 'string', required: true, description: 'Parent page or database id / URL' },
+      properties: { type: 'json', description: 'Page properties, e.g. {"Name": {"title": [{"text": {"content": "Title"}}]}}' },
+      children: { type: 'json', description: 'Content block array (native Notion block objects)' },
     },
     output: { schema: { type: 'json' }, render: renderJson },
     timeoutMs: 60_000,
@@ -138,12 +138,12 @@ export function notionCreatePageTool() {
 export function notionUpdatePageTool() {
   return defineTool({
     name: 'notion_update_page',
-    description: '更新 Notion 页面的属性或归档状态。properties 使用 Notion API 原生结构。' +
-      'Triggers: 更新 Notion 页面, 修改 Notion 属性.',
+    description: 'Update a Notion page properties or archive state. properties use the native Notion structure.' +
+      'Triggers: update Notion page, change Notion properties.',
     parameters: {
-      pageId: { type: 'string', required: true, description: '页面 id / URL' },
-      properties: { type: 'json', description: '要更新的属性（Notion 原生结构）' },
-      archived: { type: 'boolean', description: 'true 归档页面，false 恢复页面' },
+      pageId: { type: 'string', required: true, description: 'Page id / URL' },
+      properties: { type: 'json', description: 'Properties to update (native Notion structure)' },
+      archived: { type: 'boolean', description: 'true archives the page, false restores it' },
     },
     output: { schema: { type: 'json' }, render: renderJson },
     timeoutMs: 60_000,
@@ -152,7 +152,7 @@ export function notionUpdatePageTool() {
       const properties = asJson(args.properties)
       if (properties !== undefined) body.properties = properties
       if (typeof args.archived === 'boolean') body.archived = args.archived
-      if (Object.keys(body).length === 0) throw new Error('请至少提供 properties 或 archived')
+      if (Object.keys(body).length === 0) throw new Error('provide properties or archived')
       const res = await notionCall('PATCH', `/v1/pages/${normalizeId(args.pageId)}`, body)
       return { ok: true, id: res.id, url: res.url, archived: res.archived === true }
     },
@@ -163,12 +163,12 @@ export function notionUpdatePageTool() {
 export function notionAppendBlocksTool() {
   return defineTool({
     name: 'notion_append_blocks',
-    description: '向 Notion 页面或块追加内容块。children 为 Notion block 对象数组（Notion 原生结构）。' +
-      'Triggers: 追加 Notion 内容, 往 Notion 页面添加内容.',
+    description: 'Append content blocks to a Notion page or block. children is an array of native Notion block objects.' +
+      'Triggers: append Notion content, add content to a Notion page.',
     parameters: {
-      blockId: { type: 'string', required: true, description: '目标页面/块 id 或 URL' },
-      children: { type: 'json', required: true, description: '要追加的块数组（Notion 原生结构）' },
-      after: { type: 'string', description: '在此块之后插入' },
+      blockId: { type: 'string', required: true, description: 'Target page/block id or URL' },
+      children: { type: 'json', required: true, description: 'Blocks to append (native Notion structure)' },
+      after: { type: 'string', description: 'Insert after this block' },
     },
     output: { schema: { type: 'json' }, render: renderJson },
     timeoutMs: 60_000,
