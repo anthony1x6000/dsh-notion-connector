@@ -45,7 +45,8 @@ export function isAllowedRequest(request: FenceRequest, allowedHosts: string[] =
     return false
   }
   if (request.headers['sec-fetch-site'] === 'cross-site') return false
-  const origin = request.headers.origin
+  const rawOrigin = request.headers.origin
+  const origin = typeof rawOrigin === 'string' ? rawOrigin : undefined
   if (origin !== undefined) {
     try {
       if (new URL(origin).host !== hostUrl.host) return false
@@ -56,7 +57,7 @@ export function isAllowedRequest(request: FenceRequest, allowedHosts: string[] =
   if (LOOPBACK_ADDRESSES.has(request.remoteAddress ?? '') && LOOPBACK_HOSTNAMES.has(hostUrl.hostname)) {
     return true
   }
-  return allowedHosts.includes(hostUrl.host) && typeof origin === 'string'
+  return allowedHosts.includes(hostUrl.host) && origin !== undefined
 }
 
 /** Config after a successful token save; the allowlist survives. */
