@@ -8,6 +8,8 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import {
+  appendBlocks,
+  createPage,
   friendlyNotionError,
   notionCall,
   normalizeId,
@@ -25,6 +27,18 @@ function text(value: string): ContentBlock[] {
 /** JSON render shared by every tool output. */
 function renderJson(_args: unknown, value: unknown): ContentBlock[] {
   return text(JSON.stringify(value, null, 2))
+}
+
+/**
+ * Accept a JSON value or its stringified form. The harness delivers
+ * `type: 'json'` parameters as strings, which the Notion API rejects when
+ * forwarded verbatim (it wants real arrays/objects).
+ */
+function asJson<T>(value: unknown): T | undefined {
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== 'string') return value as T
+  const trimmed = value.trim()
+  return trimmed === '' ? undefined : (JSON.parse(trimmed) as T)
 }
 
 /** The workspace search tool. */
@@ -91,7 +105,7 @@ export function notionQueryDatabaseTool() {
     output: { schema: { type: 'json' }, render: renderJson },
     timeoutMs: 60_000,
     async execute(args) {
-      return queryDatabase(args)
+      return queryDatabase({ ...args, filter: asJson(args.filter), sorts: asJson(args.sorts) })
     },
   })
 }
@@ -111,13 +125,11 @@ export function notionCreatePageTool() {
     output: { schema: { type: 'json' }, render: renderJson },
     timeoutMs: 60_000,
     async execute(args) {
-      const parent = args.parentType === 'database'
-        ? { database_id: normalizeId(args.parentId) }
-        : { page_id: normalizeId(args.parentId) }
-      const body: any = { parent, properties: args.properties ?? {} }
-      if (args.children !== undefined) body.children = args.children
-      const res = await notionCall('POST', '/v1/pages', body)
-      return { ok: true, id: res.id, url: res.url }
+      return createPage(
+        { type: args.parentType, id: args.parentId },
+        asJson(args.properties) ?? {},
+        asJson<any[]>(args.children) ?? [],
+      )
     },
   })
 }
@@ -137,7 +149,8 @@ export function notionUpdatePageTool() {
     timeoutMs: 60_000,
     async execute(args) {
       const body: any = {}
-      if (args.properties !== undefined) body.properties = args.properties
+      const properties = asJson(args.properties)
+      if (properties !== undefined) body.properties = properties
       if (typeof args.archived === 'boolean') body.archived = args.archived
       if (Object.keys(body).length === 0) throw new Error('请至少提供 properties 或 archived')
       const res = await notionCall('PATCH', `/v1/pages/${normalizeId(args.pageId)}`, body)
@@ -160,10 +173,7 @@ export function notionAppendBlocksTool() {
     output: { schema: { type: 'json' }, render: renderJson },
     timeoutMs: 60_000,
     async execute(args) {
-      const body: any = { children: args.children }
-      if (args.after !== undefined) body.after = normalizeId(args.after)
-      const res = await notionCall('PATCH', `/v1/blocks/${normalizeId(args.blockId)}/children`, body)
-      return { ok: true, inserted: (res.results ?? []).map((b: any) => b.id) }
+      return appendBlocks(args.blockId, asJson<any[]>(args.children) ?? [], args.after)
     },
   })
 }

@@ -134,17 +134,29 @@ export function friendlyNotionError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-/** Accept a page id, a dashed UUID, or a full page URL; normalize to dashed UUID form. */
+/** Notion caps children per write request at 100. */
+export const MAX_CHILDREN = 100
+
+/** How many blocks a page read returns before it stops. */
+export const BLOCK_CAP = 200
+
+/** Runs one Notion REST call; injectable so tests never touch the network. */
+export type NotionCaller = (method: string, path: string, body?: unknown) => Promise<any>
+
+/**
+ * Accept a page id, a dashed UUID, or a full page URL; normalize to dashed UUID
+ * form. Notion page URLs end with the bare id after a title slug, so the
+ * trailing 32-hex run identifies the page.
+ */
 export function normalizeId(raw: string): string {
   let s = String(raw ?? '').trim()
   if (s.includes('/')) {
     s = (s.split('/').pop() ?? '').split('?')[0].split('#')[0]
   }
-  s = s.replace(/-/g, '')
-  if (/^[0-9a-fA-F]{32}$/.test(s)) {
-    return `${s.slice(0, 8)}-${s.slice(8, 12)}-${s.slice(12, 16)}-${s.slice(16, 20)}-${s.slice(20)}`
-  }
-  return s
+  const match = /([0-9a-fA-F]{32})$/.exec(s.replace(/-/g, ''))
+  if (match === null) return s
+  const id = match[1]!
+  return `${id.slice(0, 8)}-${id.slice(8, 12)}-${id.slice(12, 16)}-${id.slice(16, 20)}-${id.slice(20)}`
 }
 
 /** Join a rich_text array into plain text. */
@@ -245,34 +257,45 @@ const NESTED_TYPES: Record<string, true> = {
   table: true,
 }
 
-/** Fetch a block's children recursively (paginated, bounded). */
+/** hrefs inside a block's rich text; plain text drops them. */
+export function blockLinks(b: any): string[] {
+  const inner = b[b.type]
+  const rich = Array.isArray(inner?.rich_text) ? inner.rich_text : []
+  return rich.map((r: any) => r?.href).filter((href: unknown): href is string => typeof href === 'string')
+}
+
+/** Fetch a block's children recursively (paginated, bounded by `cap`). */
 export async function fetchBlocksRecursive(
   blockId: string,
   depth: number,
   cap: number,
-  signal?: AbortSignal,
-): Promise<any[]> {
+  call: NotionCaller = notionCall,
+): Promise<{ items: any[]; truncated: boolean }> {
   const out: any[] = []
   let cursor: string | null = null
+  let truncated = false
   for (;;) {
     let path = `/v1/blocks/${encodeURIComponent(normalizeId(blockId))}/children?page_size=100`
     if (cursor !== null) path += `&start_cursor=${encodeURIComponent(cursor)}`
-    const res = await notionCall('GET', path, undefined, signal)
+    const res = await call('GET', path)
     const list: any[] = res.results ?? []
     for (const b of list) {
-      if (out.length >= cap) return out
+      if (out.length >= cap) return { items: out, truncated: true }
       const item: any = { id: b.id, type: b.type, text: blockText(b) }
+      const links = blockLinks(b)
+      if (links.length > 0) item.links = links
       if (depth > 0 && b.has_children === true && NESTED_TYPES[b.type] === true) {
         try {
-          const kids = await fetchBlocksRecursive(b.id, depth - 1, cap - out.length, signal)
-          if (kids.length > 0) item.children = kids
+          const kids = await fetchBlocksRecursive(b.id, depth - 1, cap - out.length, call)
+          if (kids.items.length > 0) item.children = kids.items
+          if (kids.truncated) truncated = true
         } catch (error) {
           item.childrenError = friendlyNotionError(error)
         }
       }
       out.push(item)
     }
-    if (res.has_more !== true || typeof res.next_cursor !== 'string') return out
+    if (res.has_more !== true || typeof res.next_cursor !== 'string') return { items: out, truncated }
     cursor = res.next_cursor
   }
 }
@@ -282,22 +305,66 @@ export async function readPage(
   pageIdRaw: string,
   includeChildren: boolean,
   depth: number,
-  signal?: AbortSignal,
+  call: NotionCaller = notionCall,
 ): Promise<any> {
   const pageId = normalizeId(pageIdRaw)
-  const page = await notionCall('GET', `/v1/pages/${encodeURIComponent(pageId)}`, undefined, signal)
-  let title = ''
-  if (page.properties !== null && page.properties !== undefined && page.properties.title !== undefined) {
-    title = plainText(page.properties.title.title)
-  }
+  const page = await call('GET', `/v1/pages/${encodeURIComponent(pageId)}`)
+  // A page-parented page names its title property "title"; a database row can
+  // name it anything, so find the property by type instead of by key.
+  const titleProp = Object.values(page.properties ?? {}).find((p: any) => p?.type === 'title')
   const result: any = {
     id: page.id,
     url: page.url ?? null,
-    title,
+    title: titleProp ? plainText((titleProp as any).title) : '',
     properties: simplifyProperties(page.properties),
   }
-  if (includeChildren) result.blocks = await fetchBlocksRecursive(pageId, depth, 200, signal)
+  if (includeChildren) {
+    const { items, truncated } = await fetchBlocksRecursive(pageId, depth, BLOCK_CAP, call)
+    result.blocks = items
+    if (truncated) result.truncated = true
+  }
   return { ok: true, page: result }
+}
+
+/** Create a page, appending any children beyond the API limit afterwards. */
+export async function createPage(
+  parent: { type: string; id: string },
+  properties: unknown,
+  children: any[],
+  call: NotionCaller = notionCall,
+): Promise<any> {
+  const body: any = {
+    parent: parent.type === 'database'
+      ? { database_id: normalizeId(parent.id) }
+      : { page_id: normalizeId(parent.id) },
+    properties: properties ?? {},
+  }
+  const head = children.slice(0, MAX_CHILDREN)
+  if (head.length > 0) body.children = head
+  const res = await call('POST', '/v1/pages', body)
+  const rest = children.slice(MAX_CHILDREN)
+  if (rest.length > 0) await appendBlocks(res.id, rest, undefined, call)
+  return { ok: true, id: res.id, url: res.url }
+}
+
+/** Append blocks in API-sized batches; order is preserved across batches. */
+export async function appendBlocks(
+  blockId: string,
+  children: any[],
+  after: string | undefined,
+  call: NotionCaller = notionCall,
+): Promise<any> {
+  const inserted: string[] = []
+  for (let i = 0; i < children.length; i += MAX_CHILDREN) {
+    const batch = children.slice(i, i + MAX_CHILDREN)
+    const body: any = { children: batch }
+    // `after` only positions the first batch; later batches continue at the end.
+    if (i === 0 && after !== undefined) body.after = normalizeId(after)
+    const res = await call('PATCH', `/v1/blocks/${encodeURIComponent(normalizeId(blockId))}/children`, body)
+    // With `after`, Notion echoes the trailing sibling after the created blocks.
+    for (const b of (res.results ?? []).slice(0, batch.length)) inserted.push(b.id)
+  }
+  return { ok: true, inserted }
 }
 
 /** Query a database with an optional native filter/sorts, paginated. */
