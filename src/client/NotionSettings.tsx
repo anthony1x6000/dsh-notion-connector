@@ -38,7 +38,16 @@ async function api<T>(path: string, body?: unknown): Promise<T> {
     headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
-  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  if (!response.ok) {
+    let reason = ''
+    try {
+      const body = (await response.json()) as { error?: unknown }
+      if (typeof body.error === 'string') reason = body.error
+    } catch {
+      // Non-JSON error bodies fall back to the status code.
+    }
+    throw new Error(reason === '' ? `HTTP ${response.status}` : `${reason} (HTTP ${response.status})`)
+  }
   return (await response.json()) as T
 }
 
@@ -53,14 +62,14 @@ export function NotionSettings() {
     api<Status>('/status')
       .then(setStatus)
       .catch((error: unknown) => {
-        setMessage({ kind: 'err', text: `读取状态失败: ${error instanceof Error ? error.message : String(error)}` })
+        setMessage({ kind: 'err', text: `Could not read status: ${error instanceof Error ? error.message : String(error)}` })
       })
   }, [])
 
   const save = useCallback(() => {
     const value = token.trim()
     if (value === '') {
-      setMessage({ kind: 'err', text: '请先粘贴 Integration Token' })
+      setMessage({ kind: 'err', text: 'Paste an Integration Token first' })
       return
     }
     setBusy(true)
@@ -70,13 +79,13 @@ export function NotionSettings() {
         if (result.ok === true) {
           setToken('')
           setStatus({ configured: true, workspaceName: result.workspaceName ?? '', workspaceIcon: result.workspaceIcon ?? '' })
-          setMessage({ kind: 'ok', text: `连接成功：${result.workspaceName || 'Notion 工作区'}` })
+          setMessage({ kind: 'ok', text: `Connected: ${result.workspaceName || 'Notion workspace'}` })
         } else {
-          setMessage({ kind: 'err', text: result.error ?? '保存失败' })
+          setMessage({ kind: 'err', text: result.error ?? 'Save failed' })
         }
       })
       .catch((error: unknown) => {
-        setMessage({ kind: 'err', text: `保存失败: ${error instanceof Error ? error.message : String(error)}` })
+        setMessage({ kind: 'err', text: `Save failed: ${error instanceof Error ? error.message : String(error)}` })
       })
       .finally(() => setBusy(false))
   }, [token])
@@ -86,10 +95,10 @@ export function NotionSettings() {
     api<{ ok: boolean }>('/clear', {})
       .then(() => {
         setStatus({ configured: false, workspaceName: '', workspaceIcon: '' })
-        setMessage({ kind: 'ok', text: '已清除配置' })
+        setMessage({ kind: 'ok', text: 'Configuration cleared' })
       })
       .catch((error: unknown) => {
-        setMessage({ kind: 'err', text: `清除失败: ${error instanceof Error ? error.message : String(error)}` })
+        setMessage({ kind: 'err', text: `Clear failed: ${error instanceof Error ? error.message : String(error)}` })
       })
       .finally(() => setBusy(false))
   }, [])
@@ -98,37 +107,37 @@ export function NotionSettings() {
 
   return (
     <div style={styles.page}>
-      <h2 style={styles.title}>Notion 连接</h2>
+      <h2 style={styles.title}>Notion connection</h2>
       <div style={styles.status}>
         {connected
-          ? <span>已连接：<strong>{status.workspaceName || '(未命名工作区)'}</strong></span>
-          : <span style={styles.err}>未配置</span>}
+          ? <span>Connected: <strong>{status.workspaceName || '(unnamed workspace)'}</strong></span>
+          : <span style={styles.err}>Not configured</span>}
       </div>
       <div style={styles.row}>
         <input
           style={styles.input}
           type="password"
-          placeholder="粘贴 Notion Integration Token (secret_...)"
+          placeholder="Paste a Notion Integration Token (ntn_... or secret_...)"
           value={token}
           spellCheck={false}
           onChange={(event) => setToken(event.target.value)}
         />
       </div>
       <div style={styles.row}>
-        <button style={busy ? { ...styles.buttonPrimary, ...styles.buttonDisabled } : styles.buttonPrimary} disabled={busy} onClick={save}>测试并保存</button>
+        <button style={busy ? { ...styles.buttonPrimary, ...styles.buttonDisabled } : styles.buttonPrimary} disabled={busy} onClick={save}>Test and save</button>
         {connected
-          ? <button style={busy ? { ...styles.button, ...styles.buttonDisabled } : styles.button} disabled={busy} onClick={clear}>清除配置</button>
+          ? <button style={busy ? { ...styles.button, ...styles.buttonDisabled } : styles.button} disabled={busy} onClick={clear}>Clear configuration</button>
           : null}
       </div>
       {message !== null
         ? <div style={message.kind === 'ok' ? styles.ok : styles.err}>{message.text}</div>
         : null}
       <div style={styles.hint}>
-        <p style={styles.hintP}>1. 打开集成管理页创建一个 Integration（内部集成），复制 Internal Integration Secret。</p>
-        <p style={styles.hintP}>2. 在 Notion 中把要访问的页面/数据库 Share 给该 Integration。</p>
-        <p style={styles.hintP}>3. 把 Secret 粘贴到上方并保存；保存时会自动校验并读取工作区信息。</p>
-        <p style={styles.hintP}>配置后可用工具：notion_search、notion_read_page、notion_query_database、notion_create_page、notion_update_page、notion_append_blocks。</p>
-        <p style={styles.hintP}>创建 Integration：<a href="https://www.notion.so/my-integrations" target="_blank" rel="noreferrer">https://www.notion.so/my-integrations</a></p>
+        <p style={styles.hintP}>1. Open the integrations page and create an internal integration, then copy its Internal Integration Secret.</p>
+        <p style={styles.hintP}>2. In Notion, share the pages or databases the agent needs with that integration.</p>
+        <p style={styles.hintP}>3. Paste the secret above and save. Saving validates it against Notion and reads the workspace name.</p>
+        <p style={styles.hintP}>Tools available once configured: notion_search, notion_read_page, notion_query_database, notion_create_page, notion_update_page, notion_append_blocks.</p>
+        <p style={styles.hintP}>Create an integration: <a href="https://www.notion.so/my-integrations" target="_blank" rel="noreferrer">https://www.notion.so/my-integrations</a></p>
       </div>
     </div>
   )
