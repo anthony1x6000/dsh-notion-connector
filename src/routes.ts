@@ -1,14 +1,15 @@
 /**
  * The /api/dsh-notion route family: connection status, token save (validates
  * against /v1/users/me before persisting), and token clear. Every route
- * carries a loopback-only trust fence (plus browser same-origin markers) —
- * these endpoints write credentials, so LAN-exposed dsh web deployments must
- * not serve them.
+ * carries a trust fence because these endpoints write credentials. Loopback is
+ * always allowed; another host must be listed in allowedHosts, so reaching the
+ * GUI over a LAN or tailnet address is an explicit operator decision.
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
-import { clearConfig, friendlyNotionError, notionRequest, readConfig, writeConfig } from './notion.ts'
+import type { NotionConfig } from './notion.ts'
+import { friendlyNotionError, notionRequest, readConfig, writeConfig } from './notion.ts'
 
 /** Route prefix of the Notion settings API. */
 export const NOTION_API_PREFIX = '/api/dsh-notion'
@@ -16,27 +17,63 @@ export const NOTION_API_PREFIX = '/api/dsh-notion'
 /** Cap on JSON request bodies (token payloads are tiny). */
 const MAX_JSON_BODY_BYTES = 64 * 1024
 
-/** Loopback literal check plus browser same-origin markers (mirrors the pairing routes' fence). */
-function isLoopbackRequest(request: IncomingMessage): boolean {
-  const address = request.socket.remoteAddress
-  if (address !== '127.0.0.1' && address !== '::1' && address !== '::ffff:127.0.0.1') return false
+/** TCP peers that mean "this machine". */
+const LOOPBACK_ADDRESSES = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1'])
+
+/** Host header values that mean "this machine". */
+const LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '[::1]'])
+
+/** The request facts the fence inspects (kept small so it is easy to test). */
+export interface FenceRequest {
+  remoteAddress?: string
+  headers: Record<string, string | string[] | undefined>
+}
+
+/**
+ * Whether a request may touch the credential routes. Cross-site requests are
+ * always refused. Loopback passes. Any other host passes only when the
+ * operator listed it and a browser sent a matching Origin, so a page on some
+ * other site cannot rewrite the token.
+ */
+export function isAllowedRequest(request: FenceRequest, allowedHosts: string[] = []): boolean {
   const host = request.headers.host
-  if (typeof host !== 'string') return false
+  if (typeof host !== 'string' || host === '') return false
   let hostUrl: URL
   try {
     hostUrl = new URL(`http://${host}`)
   } catch {
     return false
   }
-  if (hostUrl.hostname !== '127.0.0.1' && hostUrl.hostname !== 'localhost' && hostUrl.hostname !== '[::1]') return false
   if (request.headers['sec-fetch-site'] === 'cross-site') return false
   const origin = request.headers.origin
-  if (origin === undefined) return true
-  try {
-    return new URL(origin).host === hostUrl.host
-  } catch {
-    return false
+  if (origin !== undefined) {
+    try {
+      if (new URL(origin).host !== hostUrl.host) return false
+    } catch {
+      return false
+    }
   }
+  if (LOOPBACK_ADDRESSES.has(request.remoteAddress ?? '') && LOOPBACK_HOSTNAMES.has(hostUrl.hostname)) {
+    return true
+  }
+  return allowedHosts.includes(hostUrl.host) && typeof origin === 'string'
+}
+
+/** Config after a successful token save; the allowlist survives. */
+export function nextConfigAfterSave(
+  current: NotionConfig,
+  token: string,
+  workspaceName: string,
+  workspaceIcon: string,
+): NotionConfig {
+  return { ...current, token, workspaceName, workspaceIcon }
+}
+
+/** Config after a token clear; the allowlist survives so settings stay reachable. */
+export function nextConfigAfterClear(current: NotionConfig): NotionConfig {
+  const next: NotionConfig = { ...current, workspaceName: '', workspaceIcon: '' }
+  delete next.token
+  return next
 }
 
 /** Write one JSON response. */
@@ -74,6 +111,16 @@ function readJsonBody(request: IncomingMessage): Promise<any> {
   })
 }
 
+/** The fence input for one incoming request. */
+function fenceRequest(request: IncomingMessage): FenceRequest {
+  return { remoteAddress: request.socket.remoteAddress, headers: request.headers }
+}
+
+/** 403 body that says how to opt a host in. */
+const FORBIDDEN = {
+  error: 'forbidden: settings are loopback-only. Add this Host to allowedHosts in ~/.dsh/notion.json to use the settings page from it.',
+}
+
 /** The Notion settings route family. */
 export function makeRoutes(): WebRoute[] {
   return [
@@ -81,11 +128,11 @@ export function makeRoutes(): WebRoute[] {
       kind: 'exact',
       path: `${NOTION_API_PREFIX}/status`,
       handler: async (req, res) => {
-        if (req.method !== 'GET' || !isLoopbackRequest(req)) {
-          writeJson(res, 403, { error: 'forbidden: loopback-only' })
+        const cfg = readConfig()
+        if (req.method !== 'GET' || !isAllowedRequest(fenceRequest(req), cfg.allowedHosts)) {
+          writeJson(res, 403, FORBIDDEN)
           return
         }
-        const cfg = readConfig()
         writeJson(res, 200, {
           configured: (cfg.token ?? '').trim() !== '',
           workspaceName: cfg.workspaceName ?? '',
@@ -97,20 +144,21 @@ export function makeRoutes(): WebRoute[] {
       kind: 'exact',
       path: `${NOTION_API_PREFIX}/token`,
       handler: async (req, res) => {
-        if (req.method !== 'POST' || !isLoopbackRequest(req)) {
-          writeJson(res, 403, { error: 'forbidden: loopback-only' })
+        const cfg = readConfig()
+        if (req.method !== 'POST' || !isAllowedRequest(fenceRequest(req), cfg.allowedHosts)) {
+          writeJson(res, 403, FORBIDDEN)
           return
         }
         let body: any
         try {
           body = await readJsonBody(req)
         } catch {
-          writeJson(res, 400, { ok: false, error: '请求体无效' })
+          writeJson(res, 400, { ok: false, error: 'invalid request body' })
           return
         }
         const token = typeof body.token === 'string' ? body.token.trim() : ''
         if (token === '') {
-          writeJson(res, 400, { ok: false, error: 'token 不能为空' })
+          writeJson(res, 400, { ok: false, error: 'token must not be empty' })
           return
         }
         try {
@@ -122,7 +170,7 @@ export function makeRoutes(): WebRoute[] {
           if (bot.workspace_icon !== null && bot.workspace_icon !== undefined) {
             icon = String(bot.workspace_icon.emoji ?? bot.workspace_icon.file?.url ?? '')
           }
-          writeConfig({ token, workspaceName, workspaceIcon: icon })
+          writeConfig(nextConfigAfterSave(cfg, token, workspaceName, icon))
           writeJson(res, 200, { ok: true, workspaceName, workspaceIcon: icon })
         } catch (error) {
           writeJson(res, 200, { ok: false, error: friendlyNotionError(error) })
@@ -133,11 +181,12 @@ export function makeRoutes(): WebRoute[] {
       kind: 'exact',
       path: `${NOTION_API_PREFIX}/clear`,
       handler: async (req, res) => {
-        if (req.method !== 'POST' || !isLoopbackRequest(req)) {
-          writeJson(res, 403, { error: 'forbidden: loopback-only' })
+        const cfg = readConfig()
+        if (req.method !== 'POST' || !isAllowedRequest(fenceRequest(req), cfg.allowedHosts)) {
+          writeJson(res, 403, FORBIDDEN)
           return
         }
-        clearConfig()
+        writeConfig(nextConfigAfterClear(cfg))
         writeJson(res, 200, { ok: true })
       },
     },

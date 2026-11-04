@@ -26,6 +26,11 @@ export interface NotionConfig {
   workspaceName?: string
   /** Workspace icon (emoji or file URL), captured at save time. */
   workspaceIcon?: string
+  /**
+   * Extra Host header values allowed to reach the credential routes beyond
+   * loopback, e.g. a tailnet address the GUI is served on.
+   */
+  allowedHosts?: string[]
 }
 
 /** Read the config file; any read/parse failure yields an empty config. */
@@ -106,29 +111,29 @@ export async function notionCall(
   const token = (readConfig().token ?? '').trim()
   if (token === '') {
     throw new NotionError(
-      'Notion 尚未配置：请在 设置 → Notion 中粘贴 Integration Token（在 https://www.notion.so/my-integrations 创建）。',
+      'Notion is not configured yet: paste an Integration Token in Settings -> Notion (create one at https://www.notion.so/my-integrations).',
     )
   }
   return notionRequest(token, method, path, body, signal)
 }
 
-/** Map an error to a friendly, actionable Chinese message. */
+/** Map an error to a friendly, actionable message. */
 export function friendlyNotionError(error: unknown): string {
   if (error instanceof NotionError) {
-    const message = error.message || '未知错误'
+    const message = error.message || 'unknown error'
     switch (error.status) {
       case 401:
-        return `Notion token 无效或已被撤销（401）：${message}`
+        return `Notion token is invalid or was revoked (401): ${message}`
       case 404:
-        return `Notion 资源不存在（404）：${message}。请确认页面/数据库已分享给该 Integration，且 id 正确。`
+        return `Notion resource not found (404): ${message}. Check that the page or database is shared with this integration and that the id is correct.`
       case 400:
-        return `Notion 请求参数错误（400 ${error.code ?? ''}）：${message}`
+        return `Notion rejected the request parameters (400 ${error.code ?? ''}): ${message}`
       case 409:
-        return `Notion 冲突（409）：${message}`
+        return `Notion conflict (409): ${message}`
       case 429:
-        return `Notion 请求过于频繁（429）：${message}`
+        return `Notion rate limit reached (429): ${message}`
       default:
-        return `Notion API 错误 [${error.status ?? '?'}]：${message}`
+        return `Notion API error [${error.status ?? '?'}]: ${message}`
     }
   }
   return error instanceof Error ? error.message : String(error)
