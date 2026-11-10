@@ -8,9 +8,11 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import {
+  NotionError,
   appendBlocks,
   createPage,
   friendlyNotionError,
+  jsonArg,
   notionCall,
   normalizeId,
   queryDatabase,
@@ -27,18 +29,6 @@ function text(value: string): ContentBlock[] {
 /** JSON render shared by every tool output. */
 function renderJson(_args: unknown, value: unknown): ContentBlock[] {
   return text(JSON.stringify(value, null, 2))
-}
-
-/**
- * Accept a JSON value or its stringified form. The harness delivers
- * `type: 'json'` parameters as strings, which the Notion API rejects when
- * forwarded verbatim (it wants real arrays/objects).
- */
-function asJson<T>(value: unknown): T | undefined {
-  if (value === undefined || value === null) return undefined
-  if (typeof value !== 'string') return value as T
-  const trimmed = value.trim()
-  return trimmed === '' ? undefined : (JSON.parse(trimmed) as T)
 }
 
 /** The workspace search tool. */
@@ -105,7 +95,11 @@ export function notionQueryDatabaseTool() {
     output: { schema: { type: 'json' }, render: renderJson },
     timeoutMs: 60_000,
     async execute(args) {
-      return queryDatabase({ ...args, filter: asJson(args.filter), sorts: asJson(args.sorts) })
+      return queryDatabase({
+        ...args,
+        filter: jsonArg(args.filter, 'filter', 'object'),
+        sorts: jsonArg<any[]>(args.sorts, 'sorts', 'array'),
+      })
     },
   })
 }
@@ -127,8 +121,8 @@ export function notionCreatePageTool() {
     async execute(args) {
       return createPage(
         { type: args.parentType, id: args.parentId },
-        asJson(args.properties) ?? {},
-        asJson<any[]>(args.children) ?? [],
+        jsonArg(args.properties, 'properties', 'object') ?? {},
+        jsonArg<any[]>(args.children, 'children', 'array') ?? [],
       )
     },
   })
@@ -149,7 +143,7 @@ export function notionUpdatePageTool() {
     timeoutMs: 60_000,
     async execute(args) {
       const body: any = {}
-      const properties = asJson(args.properties)
+      const properties = jsonArg(args.properties, 'properties', 'object')
       if (properties !== undefined) body.properties = properties
       if (typeof args.archived === 'boolean') body.archived = args.archived
       if (Object.keys(body).length === 0) throw new Error('provide properties or archived')
@@ -173,7 +167,9 @@ export function notionAppendBlocksTool() {
     output: { schema: { type: 'json' }, render: renderJson },
     timeoutMs: 60_000,
     async execute(args) {
-      return appendBlocks(args.blockId, asJson<any[]>(args.children) ?? [], args.after)
+      const children = jsonArg<any[]>(args.children, 'children', 'array') ?? []
+      if (children.length === 0) throw new NotionError('children must contain at least one block.')
+      return appendBlocks(args.blockId, children, args.after)
     },
   })
 }

@@ -37,7 +37,7 @@ dsh plugin --profile web add github:zhengjy01/dsh-notion-connector
 pnpm install        # esbuild / typescript / 类型依赖
 pnpm build          # esbuild: lib/index.js (host) + lib/client.js (browser)
 pnpm typecheck      # tsc --noEmit
-pnpm install:local  # 本地开发快速安装（复制到 ~/.dsh/profiles/node_modules/dsh-notion-connector）
+pnpm install:local  # 本地快速安装（复制到 ~/.dsh/profiles/<profile>/node_modules/dsh-notion-connector，默认 profile: web）
 ```
 
 ## 限制

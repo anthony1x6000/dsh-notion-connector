@@ -63,6 +63,56 @@ export class NotionError extends Error {
   }
 }
 
+/** Shape a JSON tool argument has to end up in. */
+export type JsonArgKind = 'object' | 'array'
+
+/**
+ * Normalize one `type: 'json'` tool argument.
+ *
+ * The harness projects that parameter type to an annotation-only schema, so a model may send the value itself or JSON
+ * text. Notion answers a string with "Couldn't find editable properties for these identifiers: 0,1,2,...", and a bare
+ * `JSON.parse` failure reaches the model as `Unexpected token`, so both cases are normalized here: parse the text,
+ * check the shape, and name the parameter in the error.
+ */
+export function jsonArg<T = unknown>(value: unknown, name: string, kind: JsonArgKind): T | undefined {
+  if (value === undefined || value === null) return undefined
+
+  let parsed: unknown = value
+  if (typeof value === 'string') {
+    const text = value.trim()
+    if (text === '') return undefined
+    try {
+      parsed = JSON.parse(text)
+    } catch {
+      throw new NotionError(
+        `${name} is not valid JSON. Send the native Notion structure, for example {"Name":{"title":[{"text":{"content":"Title"}}]}}.`,
+      )
+    }
+  }
+
+  if (kind === 'array') {
+    if (!Array.isArray(parsed)) {
+      throw new NotionError(`${name} must be a JSON array of Notion block objects, not ${describeValue(parsed)}.`)
+    }
+    return parsed as T
+  }
+
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new NotionError(
+      `${name} must be a JSON object mapping property names to Notion property values, not ${describeValue(parsed)}.`,
+    )
+  }
+  return parsed as T
+}
+
+/** Human wording for the value `jsonArg` rejected. */
+function describeValue(value: unknown): string {
+  if (value === null) return 'null'
+  if (Array.isArray(value)) return 'an array'
+  if (typeof value === 'object') return 'an object'
+  return `a ${typeof value}`
+}
+
 /**
  * One raw Notion REST call with an explicit token (used by the settings
  * save flow before the token is persisted).

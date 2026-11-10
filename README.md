@@ -37,7 +37,7 @@ Restart dsh web to activate the plugin.
 pnpm install        # esbuild / typescript / type dependencies
 pnpm build          # esbuild: lib/index.js (host) + lib/client.js (browser)
 pnpm typecheck      # tsc --noEmit
-pnpm install:local  # fast local dev install (copies to ~/.dsh/profiles/node_modules/dsh-notion-connector)
+pnpm install:local  # fast local dev install (copies to ~/.dsh/profiles/<profile>/node_modules/dsh-notion-connector, default profile: web)
 ```
 
 ## Limitations
