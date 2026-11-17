@@ -105,6 +105,50 @@ export function jsonArg<T = unknown>(value: unknown, name: string, kind: JsonArg
   return parsed as T
 }
 
+/** Envelope keys every block object carries; anything else object-valued is the block's payload. */
+const BLOCK_ENVELOPE = new Set(['object', 'type', 'children', 'has_children'])
+
+/**
+ * Normalize an array of Notion block objects before it goes out.
+ *
+ * A block is `{object:'block', type:'heading_2', heading_2:{...}}`, and models hand-write that envelope: they forget
+ * `object`, name a `type` that does not match the payload key, or pass a string where a block belongs. Adding the
+ * `object` key and inferring a lone payload key is safe; everything else is refused here with the index, so the failure
+ * names the parameter instead of arriving as a Notion 400 about an unknown block type.
+ */
+export function notionBlocks(children: unknown[], name: string): any[] {
+  return children.map((raw, index) => {
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+      throw new NotionError(
+        `${name}[${index}] must be a block object like {"object":"block","type":"paragraph","paragraph":{...}}.`,
+      )
+    }
+
+    const block = raw as Record<string, unknown>
+    const payloads = Object.keys(block).filter(
+      (key) => !BLOCK_ENVELOPE.has(key) && typeof block[key] === 'object' && block[key] !== null && !Array.isArray(block[key]),
+    )
+    const type = block.type
+
+    if (typeof type === 'string' && type !== '') {
+      if (payloads.length > 0 && !payloads.includes(type)) {
+        throw new NotionError(
+          `${name}[${index}] has type "${type}" but its payload key is "${payloads[0]}". The payload key must match the type, e.g. {"type":"${type}","${type}":{...}}.`,
+        )
+      }
+      return { ...block, object: 'block', type }
+    }
+
+    if (payloads.length === 1) {
+      return { ...block, object: 'block', type: payloads[0] }
+    }
+
+    throw new NotionError(
+      `${name}[${index}] needs a "type" naming the block (or exactly one payload key to infer it), e.g. {"object":"block","type":"paragraph","paragraph":{...}}.`,
+    )
+  })
+}
+
 /** Human wording for the value `jsonArg` rejected. */
 function describeValue(value: unknown): string {
   if (value === null) return 'null'
