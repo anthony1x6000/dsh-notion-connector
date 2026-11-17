@@ -13,6 +13,7 @@ import {
   createPage,
   friendlyNotionError,
   jsonArg,
+  notionBlocks,
   notionCall,
   normalizeId,
   queryDatabase,
@@ -122,7 +123,7 @@ export function notionCreatePageTool() {
       return createPage(
         { type: args.parentType, id: args.parentId },
         jsonArg(args.properties, 'properties', 'object') ?? {},
-        jsonArg<any[]>(args.children, 'children', 'array') ?? [],
+        notionBlocks(jsonArg<any[]>(args.children, 'children', 'array') ?? [], 'children'),
       )
     },
   })
@@ -167,7 +168,7 @@ export function notionAppendBlocksTool() {
     output: { schema: { type: 'json' }, render: renderJson },
     timeoutMs: 60_000,
     async execute(args) {
-      const children = jsonArg<any[]>(args.children, 'children', 'array') ?? []
+      const children = notionBlocks(jsonArg<any[]>(args.children, 'children', 'array') ?? [], 'children')
       if (children.length === 0) throw new NotionError('children must contain at least one block.')
       return appendBlocks(args.blockId, children, args.after)
     },
