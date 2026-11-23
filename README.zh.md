@@ -19,7 +19,7 @@ DeepSeek Harness 的 Notion 连接插件。配置一次 Integration Token 后，
 ## 安装
 
 ```bash
-dsh plugin --profile web add github:zhengjy01/dsh-notion-connector
+dsh plugin --profile web add github:anthony1x6000/dsh-notion-connector
 ```
 
 重启 dsh web 后生效。

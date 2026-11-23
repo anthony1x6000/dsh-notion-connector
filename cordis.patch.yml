@@ -1,7 +1,7 @@
 # dsh-notion bundle patch: inserts the dual-face plugin row into the web
 # profile roster. Applied as a profile bundle layer (the `dsh.bundle.patch`
 # manifest field); install with:
-# `dsh plugin --profile web add github:zhengjy01/dsh-notion-connector`
+# `dsh plugin --profile web add github:anthony1x6000/dsh-notion-connector`
 #
 # The row is a bare plugin by package name: the node half (exports ".") runs
 # in the host process (Notion API client, /api/dsh-notion routes, agent tools),
