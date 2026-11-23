@@ -19,7 +19,7 @@ A Notion connector plugin for DeepSeek Harness. Configure an Integration Token o
 ## Installation
 
 ```bash
-dsh plugin --profile web add github:zhengjy01/dsh-notion-connector
+dsh plugin --profile web add github:anthony1x6000/dsh-notion-connector
 ```
 
 Restart dsh web to activate the plugin.
