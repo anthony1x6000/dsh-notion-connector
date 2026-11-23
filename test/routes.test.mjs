@@ -4,8 +4,8 @@ import { describe, it } from 'node:test'
 import { isAllowedRequest, nextConfigAfterClear, nextConfigAfterSave } from '../src/routes.ts'
 
 /** Build the slice of an HTTP request the fence inspects. */
-function req(remoteAddress, headers) {
-  return { remoteAddress, headers }
+function req(remoteAddress, headers, method = 'GET') {
+  return { remoteAddress, method, headers }
 }
 
 const HOST = '100.92.191.33:3080'
@@ -42,8 +42,17 @@ describe('isAllowedRequest off-loopback', () => {
     assert.equal(isAllowedRequest(request, [HOST]), true)
   })
 
-  it('rejects a listed host when the request carries no origin', () => {
-    assert.equal(isAllowedRequest(req('100.92.191.33', { host: HOST }), [HOST]), false)
+  it('allows a listed host for a read-only request without an origin', () => {
+    // Browsers omit Origin on same-origin GET, which is the status read.
+    assert.equal(isAllowedRequest(req('100.92.191.33', { host: HOST }), [HOST]), true)
+  })
+
+  it('rejects a listed host for a write without an origin', () => {
+    assert.equal(isAllowedRequest(req('100.92.191.33', { host: HOST }, 'POST'), [HOST]), false)
+  })
+
+  it('rejects an unlisted host for a read-only request without an origin', () => {
+    assert.equal(isAllowedRequest(req('100.92.191.33', { host: HOST }), []), false)
   })
 
   it('rejects a listed host when the origin points somewhere else', () => {

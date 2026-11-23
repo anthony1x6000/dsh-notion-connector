@@ -23,17 +23,22 @@ const LOOPBACK_ADDRESSES = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1'])
 /** Host header values that mean "this machine". */
 const LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '[::1]'])
 
+/** Methods that cannot change state, so a listed host needs no Origin for them. */
+const SAFE_METHODS = new Set(['GET', 'HEAD'])
+
 /** The request facts the fence inspects (kept small so it is easy to test). */
 export interface FenceRequest {
   remoteAddress?: string
+  method?: string
   headers: Record<string, string | string[] | undefined>
 }
 
 /**
  * Whether a request may touch the credential routes. Cross-site requests are
  * always refused. Loopback passes. Any other host passes only when the
- * operator listed it and a browser sent a matching Origin, so a page on some
- * other site cannot rewrite the token.
+ * operator listed it and the request is a same-origin browser one: a matching
+ * Origin for writes, or a safe method for reads (browsers omit Origin on
+ * same-origin GET, which is what the settings page's status read is).
  */
 export function isAllowedRequest(request: FenceRequest, allowedHosts: string[] = []): boolean {
   const host = request.headers.host
@@ -57,7 +62,8 @@ export function isAllowedRequest(request: FenceRequest, allowedHosts: string[] =
   if (LOOPBACK_ADDRESSES.has(request.remoteAddress ?? '') && LOOPBACK_HOSTNAMES.has(hostUrl.hostname)) {
     return true
   }
-  return allowedHosts.includes(hostUrl.host) && origin !== undefined
+  if (!allowedHosts.includes(hostUrl.host)) return false
+  return origin !== undefined || SAFE_METHODS.has((request.method ?? '').toUpperCase())
 }
 
 /** Config after a successful token save; the allowlist survives. */
@@ -114,7 +120,7 @@ function readJsonBody(request: IncomingMessage): Promise<any> {
 
 /** The fence input for one incoming request. */
 function fenceRequest(request: IncomingMessage): FenceRequest {
-  return { remoteAddress: request.socket.remoteAddress, headers: request.headers }
+  return { remoteAddress: request.socket.remoteAddress, method: request.method, headers: request.headers }
 }
 
 /** 403 body that says how to opt a host in. */
